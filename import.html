@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Seminar Management - Full Mapping System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Sarabun', sans-serif; background-color: #f8fafc; color: #1e293b; }
+        .input-box { width: 100%; border: 1.5px solid #e2e8f0; padding: 0.65rem 0.85rem; border-radius: 0.75rem; outline: none; transition: all 0.2s; font-size: 14px; background-color: #fff; }
+        .input-box:focus { border-color: #4f46e5; box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1); }
+        .modal-scroll { max-height: 85vh; overflow-y: auto; padding-right: 10px; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .section-box { background: white; padding: 1.5rem; border-radius: 1.25rem; border: 1px solid #e2e8f0; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .section-title { font-size: 14px; font-weight: 800; color: #4f46e5; border-left: 4px solid #4f46e5; padding-left: 12px; margin-bottom: 1.25rem; text-transform: uppercase; }
+        .admin-section { background-color: #fff1f2; border-color: #fee2e2; }
+        .admin-title { color: #e11d48; border-left-color: #e11d48; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyClnFib72Jwn2umtlG0fD4jBaE-aG1ceWk",
+            authDomain: "rtcdb-66284.firebaseapp.com",
+            projectId: "rtcdb-66284",
+            storageBucket: "rtcdb-66284.firebasestorage.app",
+            messagingSenderId: "800467259752",
+            appId: "1:800467259752:web:961e90546df3390e2b06dd"
+        };
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const seminarCol = db.collection('artifacts/military-system-v12/public/data/seminar');
+        const unitsCol = db.collection('artifacts/military-system-v12/public/data/units');
+
+        const App = () => {
+            const [list, setList] = useState([]);
+            const [units, setUnits] = useState([]);
+            const [selectedIds, setSelectedIds] = useState([]);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            const [editingData, setEditingData] = useState({});
+            const fileInputRef = useRef(null);
+
+            useEffect(() => {
+                const unsubSeminar = seminarCol.onSnapshot(snap => {
+                    setList(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+                const unsubUnits = unitsCol.onSnapshot(snap => {
+                    setUnits(snap.docs.map(doc => ({ docId: doc.id, ...doc.data() })));
+                });
+                return () => { unsubSeminar(); unsubUnits(); };
+            }, []);
+
+            const handleSaveEdit = async (e) => {
+                e.preventDefault();
+                const now = new Date().toLocaleString('th-TH');
+                const data = { ...editingData, updatedAt: now };
+                if (!data.createdAt) data.createdAt = now;
+                await seminarCol.doc(data.id).set(data, { merge: true });
+                setIsModalOpen(false);
+                alert("บันทึกข้อมูลสำเร็จ");
+            };
+
+const handleImportCSV = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: async (res) => {
+                        const batch = db.batch();
+                        const now = new Date().toLocaleString('th-TH');
+                        
+                        // กำหนดฟังก์ชันดึงข้อมูลแบบฉลาด (เลือก Key ที่มีค่า)
+                        const getVal = (row, keys) => {
+                            for (let key of keys) {
+                                if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
+                                    return row[key].toString().trim();
+                                }
+                            }
+                            return "";
+                        };
+
+                        res.data.forEach(row => {
+                            // Mapping โดยรวมชื่อคอลัมน์ที่เป็นไปได้ทั้งหมดจากตัวอย่างของคุณ
+                            const mappedData = {
+                                id: getVal(row, ["id", "ID", "p0001"]).toUpperCase(),
+                                createdAt: getVal(row, ["ประทับเวลา", "สร้างเมื่อ", "createdAt"]),
+                                updatedAt: now,
+                                region: (() => {
+                                  const rawRegion = getVal(row, ["กองทัพภาค", "region", "region"]);
+                                  if (rawRegion.includes("01 : ทภ.1")) return "ทภ.1";
+                                  if (rawRegion.includes("02 : ทภ.2")) return "ทภ.2";
+                                  if (rawRegion.includes("03 : ทภ.3")) return "ทภ.3";
+                                  if (rawRegion.includes("04 : ทภ.4")) return "ทภ.4";
+                                  if (rawRegion.includes("05 : นขต.ทบ.")) return "นขต.ทบ.";
+                                  return rawRegion;
+                                })(),
+                                unitName: getVal(row, ["หน่วย", "unitName"]),
+                                rank: getVal(row, ["ยศ", "rank"]),
+                                firstName: getVal(row, ["ชื่อ", "firstName"]),
+                                lastName: getVal(row, ["สกุล", "lastName"]),
+                                nickname: getVal(row, ["ชื่อเล่น", "nickname"]),
+                                phone: getVal(row, ["เบอร์มือถือ", "phone"]),
+                                lineId: getVal(row, ["Line ID", "lineId"]),
+                                position: getVal(row, ["ตำแหน่ง", "position"]),
+                                origin: getVal(row, ["กำเนิด", "origin"]),
+                                originOther: getVal(row, ["กำเนิดอื่น", "originOther"]),
+                                batch: getVal(row, ["รุ่น", "batch"]),
+                                year: getVal(row, ["ปี", "year", "ปี พ.ศ."]),
+                                npBatch: getVal(row, ["นป. รุ่น", "npBatch"]),
+                                npYear: getVal(row, ["นป. ปี", "npyear", "npYear"]),
+                                trainingExp: (() => {
+                                  const rawExp = getVal(row, ["ประสบการณ์การเป็นผู้ฝึกทหารใหม่", "ประสบการณ์ฝึก", "trainingExp"]);
+                                  if (rawExp.includes("ไม่เคย")) return "ไม่เคยฝึก";
+                                  if (rawExp.includes("1 - 2")) return "1-2 ผลัด";
+                                  if (rawExp.includes("3 - 4")) return "3-4 ผลัด";
+                                  return rawExp;
+                                })(),
+                                travelBy: (() => {
+                                  const rawTravel = getVal(row, ["การเดินทาง", "travelBy"]);
+                                  if (rawTravel.includes("รถบัสโดยสาร") || rawTravel.includes("ส่วนรวม")) return "รถรวม";
+                                  if (rawTravel.includes("รถยนต์ส่วนบุคคล")) return "รถส่วนตัว";
+                                  return rawTravel || "รถรวม"; // ค่าเริ่มต้นถ้าไม่ระบุ
+                                })(),
+                                roomTypePref: (() => {
+                                  const rawRoom = getVal(row, ["การขอห้องพัก", "ห้องพัก", "roomTypePref"]);
+                                  if (rawRoom.includes("พักรวม")) return "พักรวม";
+                                  if (rawRoom.includes("ประสงค์พักห้องเดี่ยว")) return "พักเดี่ยว";
+                                  if (rawRoom.includes("ไม่ประสงค์รับการจัดที่พัก")) return "ไม่พัก";
+                                  return rawRoom; // กรณีไม่เข้าเงื่อนไขให้ใช้ค่าเดิม
+                                })(),
+                                paymentStatus: getVal(row, ["ชำระห้องเดี่ยว", "paymentStatus"]) || "ยังไม่จ่าย",
+                                dietary: (() => {
+                                  const rawDiet = getVal(row, ["การรับประทานอาหาร", "อาหาร", "dietary"]);
+                                  if (rawDiet.includes("ไม่มีข้อจำกัด")) return "ไม่มีข้อจำกัดด้านอาหาร";
+                                  if (rawDiet.includes("ศาสนาอิสลาม")) return "อาหารอิสลาม";
+                                  if (rawDiet.includes("มังสวิรัติ")) return "มังสวิรัติ";
+                                  if (rawDiet.includes("แพ้กุ้ง") || rawDiet.includes("แพ้อาหารทะเล")) return "แพ้อาหารทะเล";
+                                  return rawDiet || "ไม่มีข้อจำกัดด้านอาหาร"; // ค่าเริ่มต้น
+                                })(),
+                                remarks: getVal(row, ["หมายเหตุ", "remarks"]),
+                                roomId: getVal(row, ["roomID", "roomId", "ห้องพัก"]),
+                                disbursement: getVal(row, ["เบิก", "disbursement"]) || "เบิกไม่ได้"
+                            };
+
+                            // ตรวจสอบว่ามี ID หรือไม่ ถ้าไม่มีให้ข้ามแถวนี้
+                            if (mappedData.id) {
+                                batch.set(seminarCol.doc(mappedData.id), mappedData, { merge: true });
+                            }
+                        });
+
+                        try {
+                            await batch.commit();
+                            alert("นำเข้าและแก้ไขข้อมูลที่ซ้ำซ้อนสำเร็จแล้ว");
+                        } catch (err) {
+                            console.error(err);
+                            alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล");
+                        }
+                    }
+                });
+                e.target.value = null;
+            };
+
+            const filteredList = list.filter(i => `${i.firstName} ${i.lastName} ${i.unitName} ${i.region}`.toLowerCase().includes(searchTerm.toLowerCase()));
+
+            return (
+                <div className="p-6 max-w-7xl mx-auto">
+                    {/* Header */}
+                    <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+                        <div>
+                            <h1 className="text-2xl font-black text-slate-800 tracking-tight leading-none">RTMS : Users Management</h1>
+                            <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest mt-2">Import CSV เข้า Firebase (CSV จาก Google Sheet)</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            <button onClick={() => fileInputRef.current.click()} className="bg-amber-500 text-white px-5 py-2.5 rounded-xl font-bold text-xs uppercase shadow-lg hover:bg-amber-600 transition-all">📥 Import CSV</button>
+                            <input type="file" ref={fileInputRef} className="hidden" accept=".csv" onChange={handleImportCSV} />
+                            <button onClick={() => { setEditingData({ id: `P${Date.now().toString().slice(-4)}`, trainingExp: 'ไม่เคยฝึก', travelBy: 'รถรวม', roomTypePref: 'พักรวม', dietary: 'ไม่มีข้อจำกัดด้านอาหาร', disbursement: 'เบิกไม่ได้', paymentStatus: 'ยังไม่จ่าย' }); setIsModalOpen(true); }} className="bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-bold text-xs uppercase shadow-lg hover:bg-indigo-700 transition-all">+ เพิ่มผู้เข้าร่วม</button>
+                        </div>
+                    </div>
+
+                    {/* Toolbar */}
+                    <div className="bg-white p-4 rounded-2xl shadow-sm border mb-6 flex gap-4 items-center">
+                        <input className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 ring-indigo-100 font-bold text-sm" placeholder="ค้นหาชื่อ, นามสกุล หรือหน่วยงาน..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                        {selectedIds.length > 0 && <button onClick={async () => { if(confirm('ลบข้อมูลที่เลือก?')) { const b = db.batch(); selectedIds.forEach(id => b.delete(seminarCol.doc(id))); await b.commit(); setSelectedIds([]); } }} className="bg-rose-500 text-white px-6 py-3 rounded-xl font-black text-xs uppercase whitespace-nowrap">ลบ ({selectedIds.length})</button>}
+                    </div>
+
+                    {/* Table View */}
+                    <div className="bg-white rounded-3xl shadow-xl border overflow-hidden overflow-x-auto">
+                        <table className="w-full text-left text-sm border-collapse">
+                            <thead className="bg-slate-50 border-b">
+                                <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                    <th className="p-4 w-12 text-center"><input type="checkbox" onChange={e => e.target.checked ? setSelectedIds(filteredList.map(d=>d.id)) : setSelectedIds([])} checked={selectedIds.length === filteredList.length && filteredList.length > 0} /></th>
+                                    <th className="p-4">ผู้เข้าร่วมสัมมนา</th>
+                                    <th className="p-4">หน่วยงาน</th>
+                                    <th className="p-4">ห้องพัก</th>
+                                    <th className="p-4 text-right">ดำเนินการ</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {filteredList.map(i => (
+                                    <tr key={i.id} className="hover:bg-slate-50 transition-colors">
+                                        <td className="p-4 text-center"><input type="checkbox" checked={selectedIds.includes(i.id)} onChange={() => setSelectedIds(prev => prev.includes(i.id) ? prev.filter(id=>id!==i.id) : [...prev, i.id])} /></td>
+                                        <td className="p-4">
+                                            <div className="font-bold text-slate-800">{i.rank} {i.firstName} {i.lastName}</div>
+                                            <div className="text-[11px] text-indigo-500 font-bold italic">{i.nickname ? `(${i.nickname})` : ""}</div>
+                                        </td>
+                                        <td className="p-4 font-bold text-slate-500">{i.unitName || "-"}</td>
+                                        <td className="p-4"><span className={`px-2 py-0.5 rounded text-[10px] font-black border ${i.roomId ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-rose-50 text-rose-600 border-rose-100'}`}>{i.roomId || "รอจัดห้อง"}</span></td>
+                                        <td className="p-4 text-right"><button onClick={() => { setEditingData(i); setIsModalOpen(true); }} className="text-indigo-600 font-black text-[11px] uppercase hover:underline">Edit</button></td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Edit/Add Modal */}
+                    {isModalOpen && (
+                        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 z-[100]">
+                            <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col">
+                                <div className="p-6 border-b flex justify-between items-center bg-white sticky top-0 z-10">
+                                    <h2 className="text-xl font-bold text-slate-800 uppercase tracking-tight">ข้อมูลผู้เข้าร่วมสัมมนา</h2>
+                                    <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 transition-colors text-2xl">✕</button>
+                                </div>
+                                
+                                <form onSubmit={handleSaveEdit} className="p-6 modal-scroll space-y-4 bg-[#f8fafc]">
+                                    {/* 1. หมวดข้อมูลหน่วย */}
+                                    <div className="section-box">
+                                        <h3 className="section-title">1. หมวดข้อมูลหน่วย</h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">กองทัพภาค</label>
+                                                <select className="input-box font-bold" value={editingData.region || ''} onChange={e => setEditingData({...editingData, region: e.target.value, unitName: ''})}>
+                                                    <option value="">เลือกกองทัพภาค</option>
+                                                    {['ทภ.1', 'ทภ.2', 'ทภ.3', 'ทภ.4', 'นขต.ทบ.'].map(r => <option key={r} value={r}>{r}</option>)}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">หน่วย</label>
+                                                <select className="input-box font-bold" value={editingData.unitName || ''} onChange={e => setEditingData({...editingData, unitName: e.target.value})}>
+                                                    <option value="">เลือกหน่วยงาน</option>
+                                                    {units.filter(u => !editingData.region || u.region === editingData.region).map(u => (
+                                                        <option key={u.id} value={`${u.id} : ${u.name}`}>{u.id} : {u.name}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* 2. หมวดข้อมูลผู้ลงทะเบียน */}
+                                    <div className="section-box">
+                                        <h3 className="section-title">2. หมวดข้อมูลผู้ลงทะเบียน</h3>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">ยศ</label>
+                                                <select className="input-box" value={editingData.rank || ''} onChange={e => setEditingData({...editingData, rank: e.target.value})}>
+                                                    <option value="">เลือกยศ</option>
+                                                    {['พล.อ.', 'พล.ท.', 'พล.ต.', 'พ.อ.', 'พ.ท.', 'พ.ต.', 'ร.อ.', 'ร.ท.', 'ร.ต.', 'จ.ส.อ.', 'จ.ส.ท.', 'จ.ส.ต.', 'ส.อ.', 'ส.ท.', 'ส.ต.'].map(r => <option key={r} value={r}>{r}</option>)}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">ชื่อ</label>
+                                                <input className="input-box" value={editingData.firstName || ''} onChange={e => setEditingData({...editingData, firstName: e.target.value})} />
+                                            </div>
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">นามสกุล</label>
+                                                <input className="input-box" value={editingData.lastName || ''} onChange={e => setEditingData({...editingData, lastName: e.target.value})} />
+                                            </div>
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">ชื่อเล่น</label>
+                                                <input className="input-box" value={editingData.nickname || ''} onChange={e => setEditingData({...editingData, nickname: e.target.value})} />
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">เบอร์มือถือ</label>
+                                                <input className="input-box" value={editingData.phone || ''} onChange={e => setEditingData({...editingData, phone: e.target.value})} />
+                                            </div>
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">LINE ID</label>
+                                                <input className="input-box" value={editingData.lineId || ''} onChange={e => setEditingData({...editingData, lineId: e.target.value})} />
+                                            </div>
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">ตำแหน่ง</label>
+                                                <input className="input-box" value={editingData.position || ''} onChange={e => setEditingData({...editingData, position: e.target.value})} />
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">กำเนิด</label>
+                                                <select className="input-box" value={editingData.origin || ''} onChange={e => setEditingData({...editingData, origin: e.target.value})}>
+                                                    <option value="">เลือก</option>
+                                                    <option value="นตท.">นตท.</option>
+                                                    <option value="นนส.">นนส.</option>
+                                                    <option value="อื่นๆ">อื่นๆ</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">กำเนิดอื่น</label>
+                                                <input className="input-box" value={editingData.originOther || ''} onChange={e => setEditingData({...editingData, originOther: e.target.value})} />
+                                            </div>
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">รุ่น</label>
+                                                <input className="input-box" value={editingData.batch || ''} onChange={e => setEditingData({...editingData, batch: e.target.value})} />
+                                            </div>
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">ปี พ.ศ.</label>
+                                                <input className="input-box" value={editingData.year || ''} onChange={e => setEditingData({...editingData, year: e.target.value})} />
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3 mb-4 p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">นป. รุ่น (NP Batch)</label>
+                                                <input className="input-box" value={editingData.npBatch || ''} onChange={e => setEditingData({...editingData, npBatch: e.target.value})} />
+                                            </div>
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">นป. ปี พ.ศ. (NP Year)</label>
+                                                <input className="input-box" value={editingData.npYear || ''} onChange={e => setEditingData({...editingData, npYear: e.target.value})} />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">ประสบการณ์ฝึก</label>
+                                            <select className="input-box" value={editingData.trainingExp || 'ไม่เคยฝึก'} onChange={e => setEditingData({...editingData, trainingExp: e.target.value})}>
+                                                <option value="ไม่เคยฝึก">ไม่เคยฝึก</option>
+                                                <option value="1-2 ผลัด">1-2 ผลัด</option>
+                                                <option value="3-4 ผลัด">3-4 ผลัด</option>
+                                                <option value="มากกว่า 4 ผลัด">มากกว่า 4 ผลัด</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {/* 3. หมวดข้อมูลการเข้าพัก */}
+                                    <div className="section-box">
+                                        <h3 className="section-title">3. หมวดข้อมูลการเข้าพัก</h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">การเดินทาง</label>
+                                                <select className="input-box" value={editingData.travelBy || 'รถรวม'} onChange={e => setEditingData({...editingData, travelBy: e.target.value})}>
+                                                    <option value="รถรวม">รถรวม</option>
+                                                    <option value="รถส่วนตัว">รถส่วนตัว</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">ความต้องการที่พัก</label>
+                                                <select className="input-box border-2 border-indigo-300" value={editingData.roomTypePref || 'พักรวม'} onChange={e => setEditingData({...editingData, roomTypePref: e.target.value})}>
+                                                    <option value="พักรวม">พักรวม</option>
+                                                    <option value="พักเดี่ยว">พักเดี่ยว</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">ข้อจำกัดด้านอาหาร</label>
+                                            <select className="input-box" value={editingData.dietary || 'ไม่มีข้อจำกัดด้านอาหาร'} onChange={e => setEditingData({...editingData, dietary: e.target.value})}>
+                                                <option value="ไม่มีข้อจำกัดด้านอาหาร">ไม่มีข้อจำกัดด้านอาหาร</option>
+                                                <option value="อาหารอิสลาม">อาหารอิสลาม</option>
+                                                <option value="มังสวิรัติ">มังสวิรัติ</option>
+                                                <option value="แพ้อาหารทะเล">แพ้อาหารทะเล</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {/* 4. หมายเหตุ */}
+                                    <div className="section-box">
+                                        <h3 className="section-title">4. หมายเหตุ</h3>
+                                        <textarea className="input-box h-24" placeholder="ระบุข้อมูลเพิ่มเติม..." value={editingData.remarks || ''} onChange={e => setEditingData({...editingData, remarks: e.target.value})}></textarea>
+                                    </div>
+
+                                    {/* 5. หมวดผู้ดูแล */}
+                                    <div className="section-box admin-section">
+                                        <h3 className="section-title admin-title">5. หมวดผู้ดูแล</h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">หมายเลขห้อง</label>
+                                                <input className="input-box" value={editingData.roomId || ''} onChange={e => setEditingData({...editingData, roomId: e.target.value})} placeholder="ยังไม่ได้จัดห้อง" />
+                                            </div>
+                                            <div>
+                                                <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">สิทธิ์เบิกจ่าย</label>
+                                                <select className="input-box" value={editingData.disbursement || 'เบิกไม่ได้'} onChange={e => setEditingData({...editingData, disbursement: e.target.value})}>
+                                                    <option value="เบิกไม่ได้">เบิกไม่ได้</option>
+                                                    <option value="เบิกได้">เบิกได้</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="text-[11px] font-bold text-slate-400 uppercase mb-1 block">สถานะชำระเงิน</label>
+                                            <select className="input-box" value={editingData.paymentStatus || 'ยังไม่จ่าย'} onChange={e => setEditingData({...editingData, paymentStatus: e.target.value})}>
+                                                <option value="ยังไม่จ่าย">ยังไม่จ่าย</option>
+                                                <option value="จ่ายแล้ว">จ่ายแล้ว</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="pb-8">
+                                        <button type="submit" className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black uppercase text-sm shadow-xl hover:bg-indigo-700 active:scale-[0.98] transition-all">
+                                            บันทึกข้อมูลสัมมนา
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
