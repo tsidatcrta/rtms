@@ -48,8 +48,8 @@
         // รายการยศทหารบกครบถ้วน
         const RANKS = ["พล.อ.", "พล.ท.", "พล.ต.", "พ.อ. (พิเศษ)", "พ.อ.", "พ.ท.", "พ.ต.", "ร.อ.", "ร.ท.", "ร.ต.", "จ.ส.อ. (พิเศษ)", "จ.ส.อ.", "จ.ส.ท.", "จ.ส.ต.", "ส.อ.", "ส.ท.", "ส.ต.", "อื่นๆ"];
 
-        const getPersonUrl = (p) => p && p.id ? `${window.location.origin}${window.location.pathname}?id=${p.id}` : "";
-
+        const getPersonUrl = (p) => p && p.id ? `${window.location.origin}${window.location.pathname}?p=${p.id}` : "";
+        
         const QRCodeDisplay = ({ url, size = 160 }) => {
             const qrRef = useRef(null);
             useEffect(() => {
