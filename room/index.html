@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTMS Admin - Full Management System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Sarabun', sans-serif; background-color: #f8fafc; color: #1e293b; }
+        .input-box { width: 100%; border: 1.5px solid #e2e8f0; padding: 0.75rem; border-radius: 1rem; outline: none; font-size: 14px; font-weight: 600; color: #1e293b !important; background-color: white !important; }
+        .input-box:focus { border-color: #4f46e5; box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1); }
+        .room-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); border: 2px solid #f1f5f9; background: white; border-radius: 2rem; overflow: hidden; display: flex; flex-direction: column; }
+        .room-card:hover { transform: translateY(-4px); box-shadow: 0 12px 20px -5px rgba(0, 0, 0, 0.1); border-color: #e2e8f0; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .checkbox-item { width: 22px; height: 22px; border-radius: 6px; border: 2px solid #cbd5e1; cursor: pointer; display: flex; align-items: center; justify-content: center; background: white; }
+        .checkbox-item.active { background-color: #4f46e5; border-color: #4f46e5; color: white; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+        const firebaseConfig = { apiKey: "AIzaSyClnFib72Jwn2umtlG0fD4jBaE-aG1ceWk", authDomain: "rtcdb-66284.firebaseapp.com", projectId: "rtcdb-66284", storageBucket: "rtcdb-66284.firebasestorage.app", messagingSenderId: "800467259752", appId: "1:800467259752:web:961e90546df3390e2b06dd" };
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        const seminarCol = db.collection('artifacts/military-system-v12/public/data/seminar');
+        const guestsCol = db.collection('artifacts/military-system-v12/public/data/guests');
+        const roomsCol = db.collection('artifacts/military-system-v12/public/data/rooms');
+        const adminsCol = db.collection('artifacts/military-system-v12/public/data/admins');
+        const configCol = db.collection('artifacts/military-system-v12/public/data/config');
+
+        const ROLES_CONFIG = {
+            SUPER_ADMIN:   { label: 'ทั้งหมด',           color: 'bg-rose-500 text-white' },
+            SEMINAR:       { label: 'สัมมนา',             color: 'bg-indigo-500 text-white' },
+            ACCOMMODATION: { label: 'ที่พัก',       color: 'bg-emerald-500 text-white' },
+            UNITS:         { label: 'หน่วย',    color: 'bg-amber-500 text-white' },
+            VIEWER:        { label: 'ดูอย่างเดียว',   color: 'bg-slate-400 text-white' }
+        };
+
+        // รายการยศทหารบกครบถ้วน
+        const RANKS = ["พล.อ.", "พล.ท.", "พล.ต.", "พ.อ. (พิเศษ)", "พ.อ.", "พ.ท.", "พ.ต.", "ร.อ.", "ร.ท.", "ร.ต.", "จ.ส.อ. (พิเศษ)", "จ.ส.อ.", "จ.ส.ท.", "จ.ส.ต.", "ส.อ.", "ส.ท.", "ส.ต.", "อื่นๆ"];
+
+        const getPersonUrl = (p) => p && p.id ? `${window.location.origin}${window.location.pathname}?id=${p.id}` : "";
+
+        const QRCodeDisplay = ({ url, size = 160 }) => {
+            const qrRef = useRef(null);
+            useEffect(() => {
+                if (qrRef.current && url && typeof QRCode !== 'undefined') {
+                    qrRef.current.innerHTML = "";
+                    new QRCode(qrRef.current, { text: url, width: size, height: size, colorDark: "#1e293b", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H });
+                }
+            }, [url, size]);
+            return <div ref={qrRef} className="bg-white p-2 rounded-xl border border-slate-100"></div>;
+        };
+
+        const App = () => {
+            const [adminProfile, setAdminProfile] = useState(null);
+            const [mode, setMode] = useState('guest');
+            const [guestSubTab, setGuestSubTab] = useState('request');
+            const [adminSubTab, setAdminSubTab] = useState('requests');
+            const [loginForm, setLoginForm] = useState({ user: '', pass: '' });
+            const [list, setList] = useState([]);
+            const [rooms, setRooms] = useState([]);
+            const [guests, setGuests] = useState([]);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [accSearchTerm, setAccSearchTerm] = useState('');
+            const [selectedIds, setSelectedIds] = useState([]);
+            const [isConfirming, setIsConfirming] = useState(false);
+            const [selectedPerson, setSelectedPerson] = useState(null);
+            const [isGuestModalOpen, setIsGuestModalOpen] = useState(false);
+            const [isEditMode, setIsEditMode] = useState(false);
+            const [currentEditItem, setCurrentEditItem] = useState(null);
+            const [guestForm, setGuestForm] = useState({ rank: '', rankOther: '', firstName: '', lastName: '', nickname: '', position: '', category: 'กองอำนวยการ', phone: '', roomId: '', unit: '', seminarYear: '', seminarPeriod: ''});
+            
+            const [displayConfig, setDisplayConfig] = useState({ sortBy: 'unit', order: 'asc', filterPeriod: 'all', logoUrl: '' });
+            const [filterYear, setFilterYear] = useState(new Date().getFullYear() + 543);
+            const [filterPeriod, setFilterPeriod] = useState("");
+            const [reportTitle, setReportTitle] = useState("บัญชีรายชื่อจัดที่พัก RTMS");
+
+            useEffect(() => {
+                const saved = localStorage.getItem('rtms_admin_session');
+                if (saved) setAdminProfile(JSON.parse(saved));
+                const unsubS = seminarCol.onSnapshot(s => setList(s.docs.map(d => ({docId: d.id, ...d.data()}))));
+                const unsubR = roomsCol.onSnapshot(s => setRooms(s.docs.map(d => ({docId: d.id, ...d.data()}))));
+                const unsubG = guestsCol.onSnapshot(s => setGuests(s.docs.map(d => ({docId: d.id, ...d.data()}))));
+                const unsubC = configCol.doc('displaySettings').onSnapshot(doc => { if (doc.exists) setDisplayConfig(doc.data()); });
+                return () => { unsubS(); unsubR(); unsubG(); unsubC(); };
+            }, []);
+
+            const pendingPairs = useMemo(() => {
+                const pairs = []; const seen = new Set();
+                list.filter(p => (p.roomStatus === 'รออนุมัติ' || (p.roomStatus === 'อนุมัติแล้ว' && p.roomId && p.roomId.startsWith('BK-'))) && p.pendingPairWith).forEach(p => {
+                    if (!seen.has(p.docId)) {
+                        const partner = list.find(pt => pt.docId === p.pendingPairWith);
+                        if (partner) {
+                            pairs.push({ p1: p, p2: partner });
+                            seen.add(p.docId); seen.add(partner.docId);
+                        }
+                    }
+                });
+                return pairs;
+            }, [list]);
+
+// ✅ แก้ไข: ฟังก์ชันบันทึกเลขห้องให้แม่นยำและรองรับกองอำนวยการ
+            const assignRoom = async (personDocId, roomNo, type = 'seminar') => {
+                try {
+                    const person = [...list, ...guests].find(i => i.docId === personDocId || i.id === personDocId);
+                    if (!person) return;
+
+                    // กรณีคนที่มีคู่ (สถานะรออนุมัติ หรือ จอง BK-) ให้ไปทั้งคู่
+                    if (person.pendingPairWith) {
+                        const batch = db.batch();
+                        const partner = list.find(p => p.docId === person.pendingPairWith);
+                        
+                        // อัปเดตคนที่ 1
+                        batch.update(seminarCol.doc(person.docId), { 
+                            roomId: roomNo, 
+                            roomStatus: roomNo ? 'อนุมัติแล้ว' : 'ปกติ' 
+                        });
+                        
+                        // อัปเดตคู่ (ถ้ามี)
+                        if (partner) {
+                            batch.update(seminarCol.doc(partner.docId), { 
+                                roomId: roomNo, 
+                                roomStatus: roomNo ? 'อนุมัติแล้ว' : 'ปกติ' 
+                            });
+                        }
+                        await batch.commit();
+                    } else {
+                        // กรณีคนโสด หรือกองอำนวยการ
+                        const colRef = (person.category === 'กองอำนวยการ' || person.category === 'วิทยากร') ? guestsCol : seminarCol;
+                        await colRef.doc(person.docId).update({ 
+                            roomId: roomNo, 
+                            roomStatus: roomNo ? 'อนุมัติแล้ว' : 'ปกติ' 
+                        });
+                    }
+                } catch (error) {
+                    console.error("Error assigning room:", error);
+                    alert("เกิดข้อผิดพลาดในการบันทึกข้อมูล");
+                }
+            };
+
+            const assignRealRoomToPair = async (pair, roomNo) => {
+                if (!roomNo) return;
+                const batch = db.batch();
+                batch.update(seminarCol.doc(pair.p1.docId), { roomId: roomNo, roomStatus: 'อนุมัติแล้ว' });
+                batch.update(seminarCol.doc(pair.p2.docId), { roomId: roomNo, roomStatus: 'อนุมัติแล้ว' });
+                await batch.commit();
+            };
+
+            const saveDisplayConfig = async (newConfig) => {
+                await configCol.doc('displaySettings').set(newConfig);
+                alert("✅ บันทึกมุมมองเรียบร้อย");
+            };
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                const snap = await adminsCol.where('username', '==', loginForm.user).where('password', '==', loginForm.pass).get();
+                if (!snap.empty) {
+                    const data = { id: snap.docs[0].id, ...snap.docs[0].data() };
+                    setAdminProfile(data);
+                    localStorage.setItem('rtms_admin_session', JSON.stringify(data));
+                    setMode('admin');
+                } else { alert("❌ ข้อมูลไม่ถูกต้อง"); }
+            };
+
+            const handleSelect = (person) => {
+                if (selectedIds.includes(person.docId)) { 
+                    setSelectedIds(selectedIds.filter(id => id !== person.docId)); 
+                } else if (selectedIds.length < 2) { 
+                    if (person.roomStatus === 'รออนุมัติ' || person.roomStatus === 'อนุมัติแล้ว') {
+                        alert("⚠️ ไม่สามารถเลือกได้"); return;
+                    }
+                    setSelectedIds([...selectedIds, person.docId]); 
+                }
+            };
+
+            const submitPairing = async () => {
+                const batch = db.batch();
+                batch.update(seminarCol.doc(selectedIds[0]), { roomStatus: 'รออนุมัติ', pendingPairWith: selectedIds[1] });
+                batch.update(seminarCol.doc(selectedIds[1]), { roomStatus: 'รออนุมัติ', pendingPairWith: selectedIds[0] });
+                await batch.commit();
+                setSelectedIds([]); setIsConfirming(false); setGuestSubTab('pending');
+                alert("✅ ส่งคำร้องสำเร็จ");
+            };
+
+            const uniquePeriods = useMemo(() => [...new Set(list.map(i => String(i.seminarPeriod || "")))].filter(Boolean).sort(), [list]);
+
+const filteredList = useMemo(() => {
+    // 1. กรองด้วย Search Term ก่อน
+    let result = list.filter(i => 
+        `${i.firstName} ${i.lastName} ${i.unitName} ${i.id}`.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    // 2. ✅ แก้ไขการกรองผลัดให้รองรับ "all" และรูปแบบข้อความที่หลากหลาย
+    // ถ้าค่าเป็น "all" หรือ ว่างเปล่า ให้ข้ามการกรองผลัดไปเลย (แสดงทั้งหมด)
+    if (displayConfig.filterPeriod !== 'all' && displayConfig.filterPeriod !== "") {
+        result = result.filter(i => {
+            const pVal = String(i.seminarPeriod || "");
+            const filterVal = String(displayConfig.filterPeriod);
+            
+            // ตรวจสอบให้ครอบคลุม: ถ้าค่าใน DB คือ "1" แต่ filter คือ "ผลัดที่ 1" หรือสลับกันให้เจอหมด
+            return pVal === filterVal || 
+                   pVal === `ผลัดที่ ${filterVal}` || 
+                   `ผลัดที่ ${pVal}` === filterVal;
+        });
+    }
+
+    // 3. จัดเรียงลำดับ (Sorting)
+    result.sort((a, b) => {
+        let valA, valB;
+        if (displayConfig.sortBy === 'unit') {
+            valA = a.unitName || ""; valB = b.unitName || "";
+        } else if (displayConfig.sortBy === 'id') {
+            valA = a.id || ""; valB = b.id || "";
+        } else {
+            // ดึงเฉพาะตัวเลขออกมาเพื่อเรียงลำดับผลัด
+            valA = parseInt(String(a.seminarPeriod || "").replace(/\D/g, '')) || 0;
+            valB = parseInt(String(b.seminarPeriod || "").replace(/\D/g, '')) || 0;
+        }
+        const factor = displayConfig.order === 'asc' ? 1 : -1;
+        return typeof valA === 'string' 
+            ? valA.localeCompare(valB, 'th') * factor 
+            : (valA - valB) * factor;
+    });
+
+    return result;
+}, [list, searchTerm, displayConfig]);
+
+            const exportToCSV = () => {
+                const headers = ["ลำดับ", "ห้อง", "หน่วย", "ยศ", "ชื่อ", "นามสกุล", "เบอร์โทร"];
+                const allData = [...list, ...guests];
+                const csvContent = [headers, ...allData.map((item, idx) => [
+                    idx + 1, item.roomId || '', item.unitName || item.unit || '', 
+                    item.rank === 'อื่นๆ' ? item.rankOther : item.rank, 
+                    item.firstName, item.lastName, item.phone || ''
+                ])].map(e => e.join(",")).join("\n");
+                const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = `RTMS_Export_${new Date().toLocaleDateString()}.csv`;
+                link.click();
+            };
+
+            // ✅ ฟังก์ชันใหม่: Export ข้อมูลทั้งหมด (Full Data) สำหรับงาน Database/Excel
+            const exportFullDataToCSV = () => {
+                const headers = [
+                    "ลำดับ", "ประเภทบุคคล", "ID", "ยศ", "ชื่อ", "นามสกุล", 
+                    "ชื่อเล่น", "ตำแหน่ง", "หน่วยงาน", "ปี", "ผลัด", 
+                    "เลขห้อง", "เบอร์โทร", "สถานะห้อง", "คู่ที่พัก(ID)"
+                ];
+
+                const allData = [
+                    ...list.map(i => ({ ...i, pType: 'ผู้เข้าร่วมสัมมนา' })),
+                    ...guests.map(i => ({ ...i, pType: i.category || 'กองอำนวยการ' }))
+                ];
+
+                const csvContent = [
+                    headers.join(","),
+                    ...allData.map((item, idx) => [
+                        idx + 1,
+                        `"${item.pType}"`,
+                        `"${item.id}"`,
+                        `"${item.rank === 'อื่นๆ' ? item.rankOther : item.rank}"`,
+                        `"${item.firstName}"`,
+                        `"${item.lastName}"`,
+                        `"${item.nickname || ''}"`,
+                        `"${item.position || ''}"`,
+                        `"${item.unitName || item.unit || ''}"`,
+                        `"${item.seminarYear || ''}"`,
+                        `"${item.seminarPeriod || ''}"`,
+                        `"${item.roomId || ''}"`,
+                        // ✅ แก้ไขตรงนี้: บังคับให้เป็นข้อความด้วยรูปแบบสูตร Excel
+                        `"=""${item.phone || ''}"""`,
+                        `"${item.roomStatus || ''}"`,
+                        `"${item.pendingPairWith || ''}"`
+                    ].map(val => String(val).replace(/,/g, ' ')).join(","))
+                ].join("\n");
+
+                const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = `RTMS_DATABASE_FULL_${new Date().toISOString().slice(0,10)}.csv`;
+                link.click();
+            };
+
+            const printReport = () => {
+                const w = window.open('', '_blank');
+                const filteredData = [...list, ...guests].filter(item => {
+                    const matchYear = !filterYear || String(item.seminarYear) === String(filterYear);
+                    const matchPeriod = !filterPeriod || String(item.seminarPeriod || "").includes(String(filterPeriod));
+                    return matchYear && matchPeriod;
+                });
+                const rows = filteredData.map((item, idx) => `
+                    <tr>
+                        <td style="text-align:center;">${idx + 1}</td>
+                        <td style="text-align:center;font-weight:bold;">${item.roomId || '-'}</td>
+                        <td>${item.unitName || item.unit || '-'}</td>
+                        <td>${item.rank === 'อื่นๆ' ? item.rankOther : item.rank} ${item.firstName} ${item.lastName}</td>
+                        <td>${item.phone || '-'}</td>
+                        <td style="width:150px;"></td>
+                    </tr>`).join('');
+                w.document.write(`<html><head><style>@import url('https://fonts.googleapis.com/css2?family=Sarabun&display=swap'); body{font-family:'Sarabun',sans-serif;padding:40px;} table{width:100%;border-collapse:collapse;margin-top:20px;} th,td{border:1px solid black;padding:10px;font-size:14px;} th{background:#f2f2f2;}</style></head><body><h2 style="text-align:center">${reportTitle}</h2><p style="text-align:center">ปี ${filterYear} ${filterPeriod?'รุ่นที่ '+filterPeriod:''}</p><table><thead><tr><th>ลำดับ</th><th>ห้อง</th><th>หน่วย</th><th>ชื่อ-นามสกุล</th><th>โทรศัพท์</th><th>ลงชื่อ</th></tr></thead><tbody>${rows}</tbody></table><script>window.print();<\/script></body></html>`);
+                w.document.close();
+            };
+
+            const handleSaveGuest = async (e) => {
+                e.preventDefault();
+                if (isEditMode) { await guestsCol.doc(currentEditItem.docId).update(guestForm); }
+                else { await guestsCol.add({ ...guestForm, id: `G-${Date.now().toString().slice(-4)}`, createdAt: new Date().toISOString() }); }
+                setIsGuestModalOpen(false);
+            };
+
+// --- เริ่มต้นส่วน Logic ที่เพิ่มใหม่ ---
+
+            // 1. ฟังก์ชันนำเข้าห้องพักจาก CSV
+            const handleImportRoomsCSV = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = async (event) => {
+                    try {
+                        const text = event.target.result;
+                        const rows = text.split(/\r?\n/).filter(row => row.trim() !== "");
+                        const dataRows = rows.slice(1);
+                        if (!confirm(`ยืนยันการนำเข้าข้อมูลห้องพักจำนวน ${dataRows.length} ห้อง?`)) return;
+                        const batch = db.batch();
+                        let count = 0;
+                        dataRows.forEach(row => {
+                            const columns = row.split(',');
+                            const roomNo = columns[0]?.trim();
+                            let type = columns[1]?.trim();
+                            if (roomNo && type) {
+                                if (type.includes("เดี่ยว")) type = "พักเดี่ยว";
+                                if (type.includes("รวม")) type = "พักรวม";
+                                const newDocRef = roomsCol.doc();
+                                batch.set(newDocRef, { roomNo: roomNo, type: type });
+                                count++;
+                            }
+                        });
+                        await batch.commit();
+                        alert(`✅ นำเข้าห้องพักสำเร็จ ${count} ห้อง!`);
+                        e.target.value = null;
+                    } catch (err) { alert("❌ รูปแบบไฟล์ไม่ถูกต้อง"); }
+                };
+                reader.readAsText(file, 'UTF-8');
+            };
+
+            // 2. ฟังก์ชันส่งออกรายชื่อห้องพัก
+            const exportRoomsListCSV = () => {
+                const headers = ["เลขห้องพัก", "ประเภทห้อง"];
+                const sortedRooms = [...rooms].sort((a,b) => a.roomNo.localeCompare(b.roomNo, undefined, {numeric: true}));
+                const csvContent = [headers.join(","), ...sortedRooms.map(r => [`"${r.roomNo}"`, `"${r.type}"`].join(","))].join("\n");
+                const blob = new Blob(["\ufeff" + csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = `RTMS_ROOMS_LIST.csv`;
+                link.click();
+            };
+
+            // 3. ฟังก์ชันล้างที่พักทุกคน
+            const resetAllAccommodationData = async () => {
+                if (!confirm("⚠️ คำเตือน: ล้างข้อมูลห้องและคู่ของ 'ทุกคน' ในระบบ?")) return;
+                if (!confirm("ยืนยันครั้งสุดท้าย? ข้อมูลจะหายทั้งหมด!")) return;
+                try {
+                    const batch = db.batch();
+                    const resetData = { roomId: firebase.firestore.FieldValue.delete(), roomStatus: 'ปกติ', pendingPairWith: firebase.firestore.FieldValue.delete() };
+                    list.forEach(p => { batch.update(seminarCol.doc(p.docId), resetData); });
+                    guests.forEach(g => { batch.update(guestsCol.doc(g.docId), resetData); });
+                    await batch.commit();
+                    alert("✅ ล้างข้อมูลเรียบร้อยแล้ว");
+                } catch (error) { alert("เกิดข้อผิดพลาด"); }
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col text-slate-800 font-sarabun">
+                    <header className="bg-slate-900 text-white sticky top-0 z-[60] shadow-xl border-b border-white/10">
+    {/* แถวบน: Logo และกลุ่มแอดมิน/เครื่องมือ */}
+    <div className="flex justify-between items-center px-4 py-3 bg-gradient-to-b from-slate-900 to-slate-800">
+{/* ฝั่งซ้าย: Logo และชื่อหน่วยงาน */}
+<div className="flex items-center gap-3 overflow-hidden" onClick={() => handleNav('seminar')}>
+    {/* แทนที่ไอคอนโล่ด้วยรูปภาพที่อัปโหลด */}
+    <div className="shrink-0">
+        <img 
+            src="logoatcbgclr.png" 
+            alt="Office of Training Logo" 
+            className="w-10 h-10 md:w-12 md:h-12 object-contain drop-shadow-md" 
+        />
+    </div>
+    
+    <div className="flex flex-col leading-tight min-w-0">
+        <h1 className="text-base md:text-xl font-black uppercase tracking-tighter text-white">
+            RTMS <span className="text-[10px] font-bold text-indigo-400 align-top">V12.2</span>
+        </h1>
+        {/* ข้อความหน่วยงาน: ปรับขนาดให้เล็กลงในมือถือเพื่อไม่ให้เบียดกับส่วนขวา */}
+        <p className="text-[9px] md:text-[11px] font-bold text-slate-300 truncate tracking-tight">
+            สำนักการฝึก กรมยุทธศึกษาทหารบก
+        </p>
+    </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                {adminProfile ? (
+                                    <div className="flex items-center gap-3">
+                                        <div className="hidden md:flex flex-col items-end leading-tight text-right">
+                                            <span className="text-[10px] font-bold text-indigo-300">{adminProfile.name || adminProfile.username}</span>
+                                            <div className="flex gap-1 mt-1">
+                                                {(adminProfile.roles || ['ADMIN']).map(r => (
+                                                    <span key={r} className={`px-1.5 py-0.5 text-[8px] font-black rounded ${ROLES_CONFIG[r]?.color || 'bg-slate-400'}`}>{ROLES_CONFIG[r]?.label || r}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <button onClick={() => { if(confirm('ต้องการออกจากระบบ?')) { localStorage.removeItem('rtms_admin_session'); setAdminProfile(null); setMode('guest'); } }} className="p-2.5 bg-rose-500/20 text-rose-400 rounded-xl hover:bg-rose-500 hover:text-white transition-all text-xs font-black uppercase">Logout</button>
+                                    </div>
+                                ) : (
+                                    <button onClick={() => setMode('admin')} className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-[11px] font-black uppercase shadow-lg">Admin Login</button>
+                                )}
+                            </div>
+                        </div>
+                        <nav className="bg-slate-900 px-2 py-2 flex justify-center gap-2 border-t border-white/5">
+                            <button onClick={() => { setMode('guest'); setGuestSubTab('request'); }} className={`px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${mode === 'guest' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-white/5'}`}>🏠 จับคู่ที่พัก</button>
+                            {adminProfile && <button onClick={() => { setMode('admin'); setAdminSubTab('requests'); }} className={`px-5 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${mode === 'admin' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-white/5'}`}>⚙️ แอดมิน</button>}
+                        </nav>
+                    </header>
+
+                    <main className="p-6 max-w-[1600px] mx-auto w-full flex-1">
+                        {mode === 'admin' && !adminProfile ? (
+                            <div className="flex justify-center py-20 animate-in zoom-in duration-300">
+                                <form onSubmit={handleLogin} className="bg-white p-10 rounded-[3rem] shadow-2xl border-t-8 border-indigo-600 w-full max-w-sm">
+                                    <h2 className="text-xl font-black text-center mb-8 uppercase tracking-widest text-slate-800">Admin Login</h2>
+                                    <div className="space-y-4">
+                                        <input className="input-box" placeholder="Username" onChange={e => setLoginForm({...loginForm, user: e.target.value})} required />
+                                        <input className="input-box" type="password" placeholder="Password" onChange={e => setLoginForm({...loginForm, pass: e.target.value})} required />
+                                        <button className="w-full bg-indigo-600 text-white py-4 rounded-2xl font-black uppercase shadow-lg hover:bg-indigo-700 transition-all active:scale-95">เข้าสู่ระบบ</button>
+                                    </div>
+                                </form>
+                            </div>
+                        ) : mode === 'admin' ? (
+                            <div className="space-y-6">
+                                <div className="flex gap-1 overflow-x-auto border-b border-slate-200 pb-1 no-scrollbar">
+                                    {[
+                                        {id:'requests',label:'คำร้องขอจับคู่',icon:'🤝'},
+                                        {id:'accommodation',label:'จัดการที่พัก',icon:'🏠'},
+                                        {id:'manage_rooms',label:'จัดการห้อง',icon:'🔑'},
+                                        {id:'staff',label:'กองอำนวยการ',icon:'👤'},
+                                        {id:'export',label:'ส่งออกข้อมูล',icon:'📊'}
+                                    ].map(tab=>(
+                                        <button key={tab.id} onClick={()=>setAdminSubTab(tab.id)} className={`flex items-center gap-2 px-5 pb-3 text-[11px] font-black uppercase border-b-2 transition-all whitespace-nowrap ${adminSubTab===tab.id?'border-indigo-600 text-indigo-600':'border-transparent text-slate-400 hover:text-slate-600'}`}>
+                                            <span>{tab.icon}</span> {tab.label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {adminSubTab === 'accommodation' && (
+                                    <div className="animate-in fade-in duration-500 space-y-6 text-left">
+                                        <div className="bg-white p-7 rounded-[2.5rem] shadow-xl border-2 border-indigo-100 space-y-5">
+                                            <h4 className="text-xs font-black uppercase flex items-center gap-3 text-indigo-600 tracking-widest">⚙️ ตั้งค่ามุมมองการเรียงลำดับส่วนกลาง</h4>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-400 mb-1.5 font-black uppercase ml-1">เรียงตาม</label>
+                                                    <select className="input-box" value={displayConfig.sortBy} onChange={e => setDisplayConfig({...displayConfig, sortBy: e.target.value})}>
+                                                        <option value="unit">หน่วยงาน (ก-ฮ)</option>
+                                                        <option value="period">ผลัดที่ (1-2)</option>
+                                                        <option value="id">ID (0-9)</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-400 mb-1.5 font-black uppercase ml-1">ลำดับ</label>
+                                                    <select className="input-box" value={displayConfig.order} onChange={e => setDisplayConfig({...displayConfig, order: e.target.value})}>
+                                                        <option value="asc">น้อยไปมาก (A-Z)</option>
+                                                        <option value="desc">มากไปน้อย (Z-A)</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="block text-[10px] text-slate-400 mb-1.5 font-black uppercase ml-1">การกรองผลัด</label>
+                                                    <select className="input-box" value={displayConfig.filterPeriod} onChange={e => setDisplayConfig({...displayConfig, filterPeriod: e.target.value})}>
+                                                        <option value="all">แสดงทุกผลัด</option>
+                                                        {uniquePeriods.map(p => (
+                                                            <option key={p} value={p}>{p.includes('ผลัดที่') ? p : `ผลัดที่ ${p}`}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <button onClick={() => saveDisplayConfig(displayConfig)} className="bg-indigo-600 text-white py-3.5 rounded-2xl font-black uppercase text-[11px] transition-all shadow-lg active:scale-95">บันทึกตั้งค่า</button>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-amber-50 p-6 rounded-[2.5rem] border-2 border-amber-200">
+                                            <h4 className="font-black text-amber-700 text-xs uppercase tracking-widest mb-4 flex items-center gap-2">⏳ รายการที่รับจองแล้ว (รอจัดเลขห้องจริง)</h4>
+                                            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                                {pendingPairs.filter(pair => pair.p1.roomId && pair.p1.roomId.startsWith('BK-')).map((pair, idx) => (
+                                                    <div key={idx} className="bg-white p-4 rounded-2xl border border-amber-100 shadow-sm space-y-3">
+                                                        <div className="flex justify-between items-center"><span className="text-[9px] font-black bg-amber-100 text-amber-600 px-2 py-0.5 rounded-md">BOOKING: {pair.p1.roomId}</span></div>
+                                                        <div className="text-[11px] font-bold text-slate-700">{pair.p1.rank} {pair.p1.firstName} + {pair.p2.rank} {pair.p2.firstName}</div>
+<select 
+    className="w-full bg-slate-900 text-white text-[10px] font-black p-2 rounded-xl outline-none" 
+    onChange={(e) => assignRealRoomToPair(pair, e.target.value)} 
+    value=""
+>
+    <option value="">-- ระบุห้องจริง --</option>
+    {rooms
+        .filter(r => {
+            // ✅ นับจำนวนคนที่อยู่ในห้องนี้ปัจจุบัน (สัมมนา + กองอำนวยการ)
+            const occupantsCount = [...list, ...guests].filter(p => p.roomId === r.roomNo).length;
+            // ✅ กำหนดความจุตามประเภทห้อง
+            const capacity = r.type === 'พักรวม' ? 2 : 1;
+            // ✅ แสดงเฉพาะห้องที่ยังมีที่ว่าง
+            return occupantsCount < capacity;
+        })
+        .map(r => (
+            <option key={r.docId} value={r.roomNo}>{r.roomNo} ({r.type})</option>
+        ))
+    }
+</select>
+                                                    </div>
+                                                ))}
+                                                {pendingPairs.filter(p => p.p1.roomId && p.p1.roomId.startsWith('BK-')).length === 0 && <div className="col-span-full text-center py-4 text-amber-300 text-[10px] font-bold uppercase italic">ไม่มีรายการรอจัดห้อง</div>}
+                                            </div>
+                                        </div>
+
+                                        {['พักเดี่ยว', 'พักรวม'].map(roomType => (
+                                            <div key={roomType} className="space-y-4">
+                                                <div className="flex items-center gap-3 px-4 mt-6">
+                                                    <div className={`w-3 h-3 rounded-full ${roomType === 'พักเดี่ยว' ? 'bg-rose-500' : 'bg-indigo-500'}`}></div>
+                                                    <h4 className="font-black text-slate-400 text-xs uppercase tracking-widest">{roomType}</h4>
+                                                    <div className="flex-1 h-[1px] bg-slate-100"></div>
+                                                </div>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                                                    {rooms.filter(r => r.type === roomType).filter(r => (r.roomNo || '').includes(accSearchTerm)).sort((a,b)=>a.roomNo.localeCompare(b.roomNo, undefined, {numeric:true})).map(room => {
+                                                        const occupants = [...list, ...guests].filter(p => p.roomId === room.roomNo);
+                                                        const cap = room.type === 'พักรวม' ? 2 : 1;
+                                                        let statusColor = occupants.length >= cap ? "bg-rose-50 border-rose-100 text-rose-500" : (occupants.length > 0 ? "bg-amber-50 border-amber-100 text-amber-500" : "bg-emerald-50 border-emerald-100 text-emerald-500");
+                                                        return (
+                                                            <div key={room.docId} className="room-card flex flex-col border-2 overflow-hidden rounded-[2rem]">
+                                                                <div className="p-3 border-b text-[8px] font-black uppercase bg-slate-50 text-slate-400 flex justify-between items-center">
+                                                                    <span>{room.type}</span>
+                                                                    <button onClick={async () => {
+                                                                        const searchKey = prompt(`ระบุชื่อ หรือ ID เพื่อเพิ่มเข้าห้อง ${room.roomNo}:`);
+                                                                        if(searchKey) {
+                                                                            const allPeople = [...list.map(p => ({...p, cat: 'seminar'})), ...guests.map(g => ({...g, cat: 'guests'}))];
+                                                                            const target = allPeople.find(p => (p.firstName||"").includes(searchKey) || p.id === searchKey);
+                                                                            if(target) await assignRoom(target.docId, room.roomNo, target.cat);
+                                                                            else alert("ไม่พบข้อมูล");
+                                                                        }
+                                                                    }} className="text-indigo-500 hover:text-indigo-700 font-black text-[10px]">+ เพิ่มคน</button>
+                                                                </div>
+                                                                <div className="p-5 text-center flex-1">
+                                                                    <h4 className="text-4xl font-black text-slate-800 mb-4 tracking-tighter">{room.roomNo}</h4>
+                                                                    <div className="space-y-2">
+                                                                        {occupants.map(occ => (
+                                                                            <div key={occ.docId} className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 flex justify-between items-center group/item shadow-sm">
+                                                                                <div className="text-left overflow-hidden">
+                                                                                    <p className="text-[11px] font-bold text-slate-700 truncate">{occ.rank === 'อื่นๆ' ? occ.rankOther : occ.rank} {occ.firstName}</p>
+                                                                                </div>
+                                                                                <button onClick={() => assignRoom(occ.docId, '', occ.category==='guests'?'guests':'seminar')} className="text-rose-400 hover:text-rose-600 font-black opacity-0 group-hover/item:opacity-100 transition-all p-1">✕</button>
+                                                                            </div>
+                                                                        ))}
+                                                                        {occupants.length === 0 && <div className="py-4 border-2 border-dashed border-slate-100 rounded-2xl text-[9px] font-bold text-slate-200 uppercase tracking-widest">ว่าง</div>}
+                                                                    </div>
+                                                                </div>
+                                                                <div className={`p-3 border-t text-center text-[10px] font-black uppercase tracking-widest ${statusColor}`}>{occupants.length}/{cap} {occupants.length >= cap ? 'เต็ม' : 'ว่าง'}</div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {adminSubTab === 'requests' && (
+                                    <div className="animate-in fade-in duration-500 space-y-6 text-left">
+                                        <h3 className="text-xl font-black text-slate-800 uppercase flex items-center gap-3">🤝 คำร้องรออนุมัติ <span className="bg-amber-100 text-amber-600 px-4 py-1.5 rounded-full text-sm font-black">{pendingPairs.filter(p => !p.p1.roomId).length} คู่</span></h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                            {pendingPairs.filter(p => !p.p1.roomId).map((pair, idx) => (
+                                                <div key={idx} className="p-7 border-2 border-amber-200 bg-amber-50/20 rounded-[2.5rem] shadow-sm space-y-6">
+                                                    <div className="space-y-3">
+                                                        <div className="p-5 bg-white rounded-2xl border shadow-sm flex flex-col">
+                                                            <p className="font-black text-slate-800 text-[15px]">{pair.p1.rank === 'อื่นๆ' ? pair.p1.rankOther : pair.p1.rank} {pair.p1.firstName} {pair.p1.lastName}</p>
+                                                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{pair.p1.unitName}</p>
+                                                        </div>
+                                                        <div className="p-5 bg-white rounded-2xl border shadow-sm flex flex-col">
+                                                            <p className="font-black text-slate-800 text-[15px]">{pair.p2.rank === 'อื่นๆ' ? pair.p2.rankOther : pair.p2.rank} {pair.p2.firstName} {pair.p2.lastName} </p>
+                                                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{pair.p2.unitName}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-col gap-2.5 pt-4 border-t border-amber-200/50">
+<select 
+    className="input-box bg-slate-900 text-white text-[11px] p-4 rounded-2xl outline-none shadow-lg" 
+    onChange={(e) => {
+        const roomNo = e.target.value;
+        if (roomNo) {
+            assignRoom(pair.p1.docId, roomNo, 'seminar');
+            alert(`✅ ย้ายคู่เข้ารักพักห้อง ${roomNo} เรียบร้อยแล้ว`);
+        }
+    }} 
+    value=""
+>
+    <option value="">-- เลือกห้องจริงเพื่ออนุมัติ --</option>
+    {rooms
+        .filter(r => {
+            // ✅ นับจำนวนคนที่อยู่ในห้องนี้ปัจจุบัน (ทั้งจากรายชื่อสัมมนาและกองอำนวยการ)
+            const occupantsCount = [...list, ...guests].filter(p => p.roomId === r.roomNo).length;
+            // ✅ กำหนดความจุ: พักรวม = 2, พักเดี่ยว = 1
+            const capacity = r.type === 'พักรวม' ? 2 : 1;
+            // ✅ คืนค่าเฉพาะห้องที่ยังไม่เต็ม (จำนวนคนน้อยกว่าความจุ)
+            return occupantsCount < capacity;
+        })
+        .map(r => (
+            <option key={r.docId} value={r.roomNo}>{r.roomNo} ({r.type})</option>
+        ))
+    }
+</select>
+                                                <div className="flex gap-2">
+    {/* ✅ ปุ่มปฏิเสธ (ดีมากแล้วตามที่คุณส่งมา) */}
+    <button onClick={async()=>{
+        if(confirm('ยืนยันการปฏิเสธคำร้องจับคู่นี้?')) {
+            const b = db.batch();
+            b.update(seminarCol.doc(pair.p1.docId), { roomStatus: 'ปกติ', pendingPairWith: firebase.firestore.FieldValue.delete() });
+            b.update(seminarCol.doc(pair.p2.docId), { roomStatus: 'ปกติ', pendingPairWith: firebase.firestore.FieldValue.delete() });
+            await b.commit();
+            alert("❌ ปฏิเสธคำร้องเรียบร้อย");
+        }
+    }} className="flex-1 py-4 bg-rose-100 text-rose-600 rounded-2xl font-black text-[11px] uppercase">ปฏิเสธ</button>
+
+    {/* ✅ ปุ่มรับจอง (ปรับให้เรียก assignRoom ครั้งเดียวเพื่อประหยัดทรัพยากร) */}
+    <button onClick={()=>{
+        const bkId = `BK-${Math.floor(1000+Math.random()*9000)}`;
+        // ส่งแค่ ID คนแรกไป ฟังก์ชัน assignRoom จะไปจัดการคนที่สองให้เองอัตโนมัติครับ
+        assignRoom(pair.p1.docId, bkId, 'seminar');
+        alert(`✅ รับจองคู่เข้าพัก (ห้องชั่วคราว ${bkId}) เรียบร้อย`);
+    }} className="flex-[2] py-4 bg-indigo-100 text-indigo-700 rounded-2xl font-black text-[11px] uppercase border-2 border-indigo-200 hover:bg-indigo-600 hover:text-white transition-all shadow-sm">รับจอง/ย้ายไปรอจัดห้อง</button>
+</div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+{adminSubTab === 'manage_rooms' && (
+    <div className="animate-in fade-in duration-500 space-y-6 text-left">
+        {/* ส่วนหัว: จัดการและนำเข้าข้อมูล - ปรับ layout flex และ gap */}
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6">
+            <div className="text-left">
+                <h3 className="font-black uppercase tracking-tighter text-slate-800 text-2xl flex items-center gap-4 leading-tight">
+                    🔑 จัดการห้องพัก 
+                    <span className="text-sm bg-slate-100 px-3 py-1 rounded-xl text-slate-400 font-bold">{rooms.length} ห้อง</span>
+                </h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase mt-1 tracking-widest">Manage room inventory and booking status</p>
+            </div>
+
+            {/* ปุ่ม grouped และปรับขนาดให้ compact ขึ้น */}
+            <div className="flex flex-wrap gap-2.5 justify-center items-center">
+                
+                {/* --- กลุ่มปุ่มข้อมูล (Emerald) --- */}
+                <div className="flex gap-2 p-1.5 bg-slate-50 rounded-2xl border border-slate-100 shadow-inner">
+                    <div className="relative">
+                        <input type="file" accept=".csv" onChange={handleImportRoomsCSV} className="hidden" id="room-csv" />
+                        <label htmlFor="room-csv" className="cursor-pointer bg-emerald-500 text-white px-5 py-3 rounded-xl text-[10px] font-black uppercase shadow-lg hover:bg-emerald-600 transition-all flex items-center gap-1.5 whitespace-nowrap">
+                            📥 Import CSV
+                        </label>
+                    </div>
+                    <button onClick={exportRoomsListCSV} className="bg-white text-slate-600 border border-slate-200 px-5 py-3 rounded-xl text-[10px] font-black uppercase hover:bg-slate-50 transition-all flex items-center gap-1.5">
+                        📤 Export
+                    </button>
+                </div>
+
+                {/* --- กลุ่มปุ่มห้องพัก (Indigo/Rose) --- */}
+                <button onClick={() => { const no = prompt("เลขห้องพักเดี่ยว:"); if(no) roomsCol.add({ roomNo: no, type: 'พักเดี่ยว' }); }} className="bg-rose-500 text-white px-5 py-3 rounded-xl text-[10px] font-black uppercase shadow-lg hover:bg-rose-600 transition-all flex items-center gap-1.5 whitespace-nowrap">
+                    + ห้องเดี่ยว
+                </button>
+                <button onClick={() => { const no = prompt("เลขห้องพักรวม:"); if(no) roomsCol.add({ roomNo: no, type: 'พักรวม' }); }} className="bg-indigo-600 text-white px-5 py-3 rounded-xl text-[10px] font-black uppercase shadow-lg hover:bg-indigo-700 transition-all flex items-center gap-1.5 whitespace-nowrap">
+                    + ห้องรวม
+                </button>
+
+                {/* --- ปุ่มอันตราย (ล้างทุกคน) --- */}
+                <button onClick={resetAllAccommodationData} className="bg-rose-100 text-rose-600 border border-rose-200 px-5 py-3 rounded-xl text-[10px] font-black uppercase hover:bg-rose-600 hover:text-white transition-all flex items-center gap-1.5 ml-2">
+                    🚨 ล้างที่พักทุกคน
+                </button>
+            </div>
+        </div>
+
+        {/* ส่วนแสดงผลรายการห้องพัก - คงเดิม */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-4">
+            {rooms.sort((a,b)=>a.roomNo.localeCompare(b.roomNo, undefined, {numeric:true})).map(room => (
+                <div key={room.docId} className="bg-white p-6 rounded-[2rem] border-2 border-slate-100 text-center relative group hover:border-indigo-200 transition-all shadow-sm">
+                    {/* ปุ่มลบห้องรายห้อง */}
+                    <button onClick={async () => { if(confirm(`ลบห้อง ${room.roomNo}?`)) await roomsCol.doc(room.docId).delete(); }} className="absolute -top-2 -right-2 w-8 h-8 bg-rose-500 text-white rounded-full opacity-0 group-hover:opacity-100 shadow-lg flex items-center justify-center text-xs z-10 transition-all">✕</button>
+                    
+                    <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md mb-2 inline-block ${room.type==='พักเดี่ยว'?'bg-rose-50 text-rose-400':'bg-indigo-50 text-indigo-400'}`}>
+                        {room.type}
+                    </span>
+                    <h4 className="text-2xl font-black text-slate-800 tracking-tighter leading-none">{room.roomNo}</h4>
+                </div>
+            ))}
+        </div>
+    </div>
+)}
+
+
+                                {adminSubTab === 'export' && (
+                                    <div className="animate-in fade-in duration-500 space-y-8 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm text-left">
+                                        <div className="flex items-center gap-5">
+                                            <div className="bg-indigo-600 w-16 h-16 rounded-[1.5rem] text-white flex items-center justify-center text-3xl shadow-xl shadow-indigo-200 font-black">📊</div>
+                                            <div>
+                                                <h2 className="text-2xl font-black uppercase text-slate-800 tracking-tighter leading-tight">ระบบสรุปผลและรายงาน</h2>
+                                                <p className="text-[11px] font-bold text-slate-400 mt-1 uppercase tracking-widest">RTMS Reports Management</p>
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 bg-slate-50 p-8 rounded-[2.5rem]">
+                                            <div><label className="block text-[10px] font-black text-indigo-400 uppercase mb-2 ml-1">ปี พ.ศ.</label><input className="input-box" value={filterYear} onChange={e=>setFilterYear(e.target.value)} /></div>
+                                            <div><label className="block text-[10px] font-black text-indigo-400 uppercase mb-2 ml-1">ผลัดที่</label><input className="input-box" value={filterPeriod} onChange={e=>setFilterPeriod(e.target.value)} placeholder="ทั้งหมด" /></div>
+                                            <div className="lg:col-span-2"><label className="block text-[10px] font-black text-indigo-400 uppercase mb-2 ml-1">หัวข้อรายงาน</label><input className="input-box" value={reportTitle} onChange={e=>setReportTitle(e.target.value)} /></div>
+                                        </div>
+                                        <div className="flex flex-col sm:flex-row gap-4 pt-4">
+                                            <button onClick={printReport} className="flex-1 bg-slate-900 text-white py-5 rounded-[1.5rem] font-black uppercase shadow-2xl hover:bg-indigo-600 transition-all flex items-center justify-center gap-4 active:scale-95">🖨️ พิมพ์ใบลงชื่อเข้าพัก</button>
+                                            <button onClick={exportToCSV} className="flex-1 bg-emerald-600 text-white py-5 rounded-[1.5rem] font-black uppercase shadow-2xl hover:bg-emerald-700 transition-all flex items-center justify-center gap-4 active:scale-95">📊 ส่งออกไฟล์ EXCEL (.CSV)</button>
+                                            <button onClick={exportFullDataToCSV} className="flex-1 bg-indigo-600 text-white py-5 rounded-[1.5rem] font-black uppercase shadow-2xl hover:bg-indigo-700 transition-all active:scale-95">📁 CSV (ข้อมูลทั้งหมด)</button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="space-y-6 animate-in fade-in">
+                                <div className="flex flex-col md:flex-row justify-between items-end gap-6 mb-10">
+                                    <div className="text-left"><h2 className="text-4xl font-black text-slate-800 uppercase tracking-tighter mb-1">จับคู่ที่พัก</h2><p className="text-slate-400 text-sm font-bold tracking-tight">ระบบเลือกเพื่อนร่วมห้องสัมมนา (จำกัด 2 ท่าน)</p></div>
+                                    <div className="flex bg-slate-100 p-2 rounded-[1.5rem] border border-slate-200 shadow-inner w-fit">
+                                        <button onClick={() => setGuestSubTab('request')} className={`px-8 py-3 rounded-2xl text-[11px] font-black uppercase transition-all ${guestSubTab === 'request' ? 'bg-white text-indigo-600 shadow-md ring-1 ring-slate-200 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}>📝 ขอจับคู่</button>
+                                        <button onClick={() => setGuestSubTab('pending')} className={`px-8 py-3 rounded-2xl text-[11px] font-black uppercase transition-all flex items-center gap-3 ${guestSubTab === 'pending' ? 'bg-white text-amber-600 shadow-md ring-1 ring-slate-200 text-amber-600' : 'text-slate-400 hover:text-slate-600'}`}>
+                                            ⏳ ตรวจสอบสถานะ {pendingPairs.length > 0 && <span className="bg-amber-500 text-white w-5 h-5 rounded-full flex items-center justify-center text-[9px] animate-pulse shadow-sm font-black">!</span>}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {guestSubTab === 'request' ? (
+                                    <div className="animate-in slide-in-from-left-4 duration-500 text-left">
+                                        <div className="relative max-w-2xl mb-8">
+                                            <input className="w-full pl-14 pr-6 py-5 bg-white border-2 border-slate-100 rounded-[1.5rem] shadow-xl shadow-slate-200/50 font-bold text-sm focus:border-indigo-500 outline-none transition-all" placeholder="ค้นหาชื่อ, นามสกุล หรือหน่วยงาน..." onChange={e => setSearchTerm(e.target.value)} />
+                                            <span className="absolute left-5 top-1/2 -translate-y-1/2 text-2xl opacity-20">🔍</span>
+                                        </div>
+                                        <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-slate-200/50 border border-slate-100 overflow-hidden mb-32">
+                                            <table className="w-full text-left text-sm font-bold">
+                                                <thead className="bg-slate-50 border-b text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] sticky top-0">
+                                                    <tr><th className="p-6 w-[80px] text-center">เลือก</th><th className="p-6">ชื่อ-นามสกุล</th><th className="p-6 hidden md:table-cell">หน่วยงาน</th><th className="p-6 text-center">ผลัด</th><th className="p-6 text-center">สถานะ</th></tr>
+                                                </thead>
+                                                <tbody className="divide-y text-slate-700">
+                                                    {filteredList.map(i => (
+                                                        <tr key={i.docId} className={`hover:bg-indigo-50/20 transition-colors ${i.roomStatus === 'รออนุมัติ' ? 'bg-amber-50/10' : ''}`}>
+                                                            <td className="p-6 text-center">
+                                                                {(!i.roomStatus || i.roomStatus === 'ปกติ') ? (
+                                                                    <div onClick={() => handleSelect(i)} className={`w-8 h-8 rounded-xl border-2 flex items-center justify-center cursor-pointer transition-all mx-auto ${selectedIds.includes(i.docId) ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-white border-slate-200'}`}>{selectedIds.includes(i.docId) && "✓"}</div>
+                                                                ) : ( <div className="text-xl opacity-20 cursor-not-allowed">🔒</div> )}
+                                                            </td>
+                                                            <td className="p-6">
+                                                                <div onClick={()=>setSelectedPerson({...i, type:'seminar'})} className="cursor-pointer group flex flex-col w-fit">
+                                                                    <span className="text-slate-800 text-base group-hover:text-indigo-600 transition-all leading-tight">{i.rank} {i.firstName} {i.lastName}</span>
+                                                                    <span className="text-[10px] text-slate-300 font-black uppercase mt-1">ID: {i.id}</span>
+                                                                </div>
+                                                            </td>
+                                                            <td className="p-6 hidden md:table-cell text-xs font-black text-slate-300 uppercase">{i.unitName}</td>
+                                                            <td className="p-6 text-center"><span className="inline-block px-3 py-1 rounded-lg bg-slate-100 text-slate-400 text-[10px] font-black whitespace-nowrap">{i.seminarPeriod ? (i.seminarPeriod.includes('ผลัดที่') ? i.seminarPeriod : `ผลัดที่ ${i.seminarPeriod}`) : '-'}</span></td>
+                                                            <td className="p-6 text-center">
+                                                                {i.roomStatus === 'รออนุมัติ' ? <span className="px-4 py-1.5 bg-amber-400 text-white rounded-lg text-[9px] font-black uppercase tracking-widest shadow-md">รออนุมัติ</span> : i.roomStatus === 'อนุมัติแล้ว' ? <span className="px-4 py-1.5 bg-emerald-500 text-white rounded-lg text-[9px] font-black uppercase tracking-widest">{i.roomId}</span> : <span className="text-slate-200">-</span>}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="animate-in slide-in-from-right-4 duration-500 text-left min-h-[400px]">
+                                        {pendingPairs.length > 0 ? (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                                                {pendingPairs.filter(p => !p.p1.roomId).length > 0 && (
+                                                    <div className="col-span-full mb-4"><h4 className="font-black text-amber-500 text-xs uppercase tracking-widest border-l-4 border-amber-500 pl-3">🕒 อยู่ระหว่างรอแอดมินพิจารณา</h4></div>
+                                                )}
+                                                {pendingPairs.filter(p => !p.p1.roomId).map((pair, idx) => (
+                                                    <div key={`wait-${idx}`} className="bg-white p-8 rounded-[0.5rem] border-2 border-amber-100 shadow-2xl flex flex-col gap-6 relative overflow-hidden group">
+                                                        <div className="absolute top-0 right-0 bg-amber-500 text-white px-4 py-1.5 font-black text-[9px] uppercase rounded-bl-2xl">รออนุมัติ</div>
+                                                        <div className="space-y-4">
+                                                            <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-inner"><p className="font-black text-slate-800 text-lg">{pair.p1.rank} {pair.p1.firstName} {pair.p1.lastName}</p><p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{pair.p1.unitName}</p></div>
+                                                            <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 shadow-inner"><p className="font-black text-slate-800 text-lg">{pair.p2.rank} {pair.p2.firstName} {pair.p2.lastName}</p><p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{pair.p2.unitName}</p></div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+
+                                                {pendingPairs.filter(p => p.p1.roomId && p.p1.roomId.startsWith('BK-')).length > 0 && (
+                                                    <div className="col-span-full mb-4 mt-8"><h4 className="font-black text-indigo-500 text-xs uppercase tracking-widest border-l-4 border-indigo-500 pl-3">✅ แอดมินรับจองแล้ว (รอระบุเลขห้องพัก)</h4></div>
+                                                )}
+                                                {pendingPairs.filter(p => p.p1.roomId && p.p1.roomId.startsWith('BK-')).map((pair, idx) => (
+                                                    <div key={`booked-${idx}`} className="bg-white p-8 rounded-[3rem] border-2 border-indigo-100 shadow-2xl flex flex-col gap-6 relative overflow-hidden">
+                                                        <div className="absolute top-0 right-0 bg-indigo-600 text-white px-4 py-1.5 font-black text-[9px] uppercase rounded-bl-2xl">BOOKED: {pair.p1.roomId}</div>
+                                                        <div className="space-y-4">
+                                                            <div className="p-5 bg-indigo-50/30 rounded-2xl border border-indigo-100"><p className="font-black text-slate-800 text-lg">{pair.p1.rank} {pair.p1.firstName} {pair.p1.lastName}</p><p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{pair.p1.unitName}</p></div>
+                                                            <div className="flex justify-center text-indigo-300 font-black text-[10px] uppercase tracking-[0.5em] my-1">WITH</div>
+                                                            <div className="p-5 bg-indigo-50/30 rounded-2xl border border-indigo-100"><p className="font-black text-slate-800 text-lg">{pair.p2.rank} {pair.p2.firstName} {pair.p2.lastName}</p><p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{pair.p2.unitName}</p></div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-col items-center justify-center py-32 text-slate-200 border-4 border-dashed border-slate-50 rounded-[4rem] animate-pulse">
+                                                <div className="text-7xl mb-6">📭</div>
+                                                <p className="font-black uppercase tracking-widest italic text-lg">ยังไม่มีคำร้องรอดำเนินการ</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                {guestSubTab === 'request' && selectedIds.length > 0 && (
+                                    <div className="fixed bottom-10 left-0 right-0 flex justify-center px-4 z-40 animate-bounce">
+                                        <div className="bg-slate-900 text-white px-10 py-5 rounded-[2.5rem] shadow-2xl flex items-center gap-8 border border-slate-700">
+                                            <div className="flex flex-col leading-tight"><span className="text-[9px] text-indigo-400 font-black uppercase tracking-widest mb-1">Status</span><span className="text-sm font-bold">{selectedIds.length === 1 ? `เลือกแล้ว 1 ท่าน...` : `เลือกครบ 2 ท่านแล้ว`}</span></div>
+                                            {selectedIds.length === 2 && <button onClick={() => setIsConfirming(true)} className="bg-indigo-600 px-7 py-3 rounded-2xl text-xs font-black uppercase hover:bg-indigo-700 shadow-xl transition-all active:scale-95 shadow-indigo-500/50">ยืนยันการจับคู่</button>}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </main>
+
+                    {isConfirming && (
+                        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
+                            <div className="bg-white rounded-[3rem] p-12 max-w-sm w-full text-center shadow-2xl animate-in zoom-in">
+                                <div className="text-7xl mb-8">🤝</div>
+                                <h3 className="text-2xl font-black mb-4 uppercase text-slate-800 tracking-tighter">ส่งคำร้องขอพักร่วมกัน</h3>
+                                <p className="text-sm text-slate-400 mb-10 font-bold leading-relaxed">ข้อมูลจะถูกส่งไปยังระบบแอดมิน เพื่อพิจารณาจัดสรรห้องพักจริงต่อไป</p>
+                                <div className="flex flex-col gap-4">
+                                    <button onClick={submitPairing} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black uppercase shadow-xl hover:bg-indigo-700 transition-all active:scale-95">ยืนยันส่งข้อมูล</button>
+                                    <button onClick={() => setIsConfirming(false)} className="text-slate-300 py-2 text-[11px] font-black uppercase hover:text-rose-500 transition-colors">ยกเลิก</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+{isGuestModalOpen && (
+    <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
+        <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in">
+            <div className="p-8 bg-slate-50 border-b flex justify-between items-center font-bold font-sarabun">
+                <h3 className="uppercase text-slate-800 font-black tracking-tighter text-xl">
+                    {isEditMode ? '📝 แก้ไขข้อมูล' : '➕ เพิ่มรายชื่อใหม่'}
+                </h3>
+                <button onClick={() => setIsGuestModalOpen(false)} className="text-slate-300 hover:text-rose-500 text-3xl">✕</button>
+            </div>
+            <form onSubmit={handleSaveGuest} className="p-10 space-y-5 max-h-[75vh] overflow-y-auto no-scrollbar text-left font-bold font-sarabun">
+                <div className="grid grid-cols-2 gap-5">
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-1.5 block">ยศ</label>
+                        <select className="input-box" value={guestForm.rank} onChange={e => setGuestForm({...guestForm, rank: e.target.value})} required>
+                            <option value="">-- เลือกยศ --</option>
+                            {RANKS.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                    </div>
+                    {guestForm.rank === 'อื่นๆ' && (
+                        <div>
+                            <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-1.5 block">ระบุยศเอง</label>
+                            <input className="input-box" value={guestForm.rankOther} onChange={e => setGuestForm({...guestForm, rankOther: e.target.value})} required />
+                        </div>
+                    )}
+                </div>
+<div className="grid grid-cols-2 gap-5">
+    <div>
+        <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-1.5 block">ชื่อ (ไม่ต้องระบุยศ)</label>
+        <input className="input-box" placeholder="กรอกชื่อ" value={guestForm.firstName} onChange={e => setGuestForm({...guestForm, firstName: e.target.value})} required />
+    </div>
+    <div>
+        <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-1.5 block">นามสกุล</label>
+        <input className="input-box" placeholder="กรอกนามสกุล" value={guestForm.lastName} onChange={e => setGuestForm({...guestForm, lastName: e.target.value})} required />
+    </div>
+</div>
+
+{/* --- ส่วน ตำแหน่ง --- */}
+<div>
+    <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-1.5 block">ตำแหน่ง</label>
+    <input className="input-box" placeholder="เช่น ผบ.ร้อย., รอง ผบ.พัน." value={guestForm.position} onChange={e => setGuestForm({...guestForm, position: e.target.value})} />
+</div>
+
+{/* --- ส่วน หน่วยงาน --- */}
+<div>
+    <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-1.5 block">สังกัด / หน่วยงาน</label>
+    <input className="input-box" placeholder="เช่น มทบ.11, ป.4 พัน.104" value={guestForm.unit} onChange={e => setGuestForm({...guestForm, unit: e.target.value})} />
+</div>
+                
+<div className="grid grid-cols-2 gap-5">
+    <div>
+        <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-1.5 block">ปี พ.ศ. (ล็อคค่า)</label>
+        <input 
+            className="input-box bg-slate-100 text-slate-500 cursor-not-allowed font-bold" 
+            value={guestForm.seminarYear} 
+            readOnly 
+        />
+    </div>
+    <div>
+        <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-1.5 block">ผลัดที่ (ล็อคค่า)</label>
+        <input 
+            className="input-box bg-slate-100 text-slate-500 cursor-not-allowed font-bold" 
+            value={guestForm.seminarPeriod} 
+            readOnly 
+        />
+    </div>
+</div>
+
+                <div className="grid grid-cols-2 gap-5">
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400 ml-1 mb-1.5 block">ประเภท</label>
+                        <select className="input-box" value={guestForm.category} onChange={e => setGuestForm({...guestForm, category: e.target.value})}>
+                            <option value="กองอำนวยการ">กองอำนวยการ</option>
+                            <option value="วิทยากร">วิทยากร</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-indigo-500 ml-1 mb-1.5 block">🏢 ระบุห้องพัก</label>
+                        <select 
+                            className="input-box border-indigo-200 bg-indigo-50/30 font-bold text-indigo-700" 
+                            value={guestForm.roomId || ""} 
+                            onChange={e => setGuestForm({...guestForm, roomId: e.target.value})}
+                        >
+                            <option value="">-- ยังไม่ระบุห้อง --</option>
+                            {rooms.map(r => (
+                                <option key={r.docId} value={r.roomNo}>
+                                    {r.roomNo} ({r.type})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+
+                <div className="pt-6 flex gap-4">
+                    <button type="submit" className="flex-1 bg-indigo-600 text-white py-5 rounded-2xl font-black uppercase shadow-lg hover:bg-indigo-700 transition-all active:scale-95">
+                        บันทึกข้อมูลบุคคล
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+)}
+
+                    {selectedPerson && (
+                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[200] flex items-center justify-center p-4 animate-in fade-in duration-300">
+                            <div className="bg-white rounded-[3.5rem] shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in">
+                                <div className="p-8 bg-slate-50 border-b flex justify-between items-center font-bold font-sarabun"><h3 className="font-black uppercase text-slate-800 tracking-tighter text-xl">ข้อมูลบุคคล</h3><button onClick={() => setSelectedPerson(null)} className="text-slate-300 hover:text-rose-500 text-4xl">✕</button></div>
+                                <div className="p-10 text-left space-y-6">
+                                    <div className="bg-indigo-50/50 p-8 rounded-[3rem] border border-indigo-100 flex flex-col sm:flex-row gap-8 items-center shadow-inner">
+                                        <div className="w-24 h-24 bg-white rounded-[1.5rem] shadow-xl flex items-center justify-center text-4xl font-sarabun text-indigo-600">👤</div>
+                                        <div className="space-y-2 flex-1">
+                                            <div className="text-[11px] font-black text-indigo-400 uppercase tracking-widest">{selectedPerson.category || 'Participant'}</div>
+                                            <h3 className="text-2xl font-black text-slate-800 leading-tight">{selectedPerson.rank === 'อื่นๆ' ? selectedPerson.rankOther : selectedPerson.rank} {selectedPerson.firstName} {selectedPerson.lastName}</h3>
+                                            <div className="text-sm font-bold text-slate-400 uppercase mt-2 font-sarabun">หน่วยงาน: {selectedPerson.unitName || selectedPerson.unit || '-'}</div>
+                                            <div className="text-sm font-bold text-slate-400 uppercase font-sarabun">เลขห้องพัก: <span className="text-rose-500 font-black text-xl ml-1">{selectedPerson.roomId || 'ยังไม่ระบุ'}</span></div>
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-center p-6 border-2 border-slate-100 rounded-[2.5rem] bg-white shadow-inner"><QRCodeDisplay url={getPersonUrl(selectedPerson)} size={160} /></div>
+                                    <button onClick={() => setSelectedPerson(null)} className="w-full mt-10 py-5 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-xs hover:bg-rose-50 hover:text-rose-500 transition-all font-sarabun shadow-sm">ปิดหน้าต่างข้อมูล</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
