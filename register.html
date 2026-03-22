@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>RTMS - ยืนยันตัวตน & Dashboard v2.8</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Sarabun', sans-serif; background-color: #0f172a; color: #f8fafc; }
+        .glass-card { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        .input-box { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255, 255, 255, 0.1); transition: all 0.3s; color: white; }
+        .input-box:focus { border-color: #6366f1; box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2); }
+        .qr-container img, .qr-container canvas { border-radius: 0 !important; margin: 0 auto; }
+        .step-animate { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center p-4">
+
+    <div class="fixed top-4 right-4 z-[110]">
+        <button onclick="toggleDashboard()" class="bg-slate-800/50 p-2 rounded-full border border-white/10 text-[9px] font-black uppercase opacity-30 hover:opacity-100 transition-all text-white">Admin Monitor</button>
+    </div>
+
+    <div id="registration-ui" class="w-full max-w-md flex-1 flex flex-col justify-center">
+        <div id="step-search" class="glass-card rounded-[2.5rem] p-8 shadow-2xl relative overflow-hidden">
+            <div class="text-center mb-6">
+                <div class="inline-flex items-center justify-center w-16 h-16 bg-indigo-600 rounded-2xl mb-4 shadow-xl">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                </div>
+                <h1 class="text-2xl font-black uppercase tracking-tighter leading-none text-white text-center">ยืนยันการลงทะเบียน</h1>
+                <p class="text-[11px] font-bold text-indigo-400 uppercase tracking-widest mt-2 text-center">ตรวจสอบรายชื่อด้วยเบอร์โทรศัพท์ (ที่ลงทะเบียนใน Google Form)</p>
+            </div>
+            <div class="bg-indigo-500/10 border-l-4 border-indigo-500 p-4 mb-6 rounded-r-xl text-[11px]">
+                <p class="text-slate-300 leading-relaxed font-bold">ประกาศ: ระบบนี้เป็นระบบทดสอบ สำหรับผู้ที่ลงทะเบียนใน Google Form ให้ใช้เบอรโทรศัพท์เพื่อยืนยันการลงทะเบียน เมื่อยืนยันตัวตนเรียบร้อยแล้ว กรุณาลงชื่อรายงานตัว ณ กองอำนวยการ QR Code ที่บันทึกไว้เพื่อสะดวกในการตรวจสอบต่อไป เช่น ระบบเช็คอิน, ตรวจสอบข้อมูลผู้เข้าร่วมสัมมนาของทางกองอำนวยการ เป็นต้น</p>
+            </div>
+            <div class="space-y-6">
+                <input id="search-phone" type="tel" placeholder="เบอร์โทร 10 หลัก" class="w-full input-box rounded-2xl px-6 py-4 text-center text-lg font-bold outline-none tracking-widest">
+                <button onclick="searchByPhone()" id="btn-search" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-5 rounded-2xl shadow-xl transition-all uppercase text-xs tracking-widest active:scale-95">ตรวจสอบข้อมูล</button>
+            </div>
+        </div>
+
+        <div id="step-confirm" class="hidden glass-card rounded-[2.5rem] p-8 shadow-2xl step-animate text-white text-center">
+            <div class="bg-indigo-500/10 border border-indigo-500/20 rounded-3xl p-6 mb-6">
+                <p class="text-[10px] font-black text-indigo-400 uppercase mb-2">ข้อมูลผู้ลงทะเบียน</p>
+                <h2 id="conf-name" class="text-xl font-black text-white mb-1 leading-tight">---</h2>
+                <p id="conf-unit" class="text-xs font-bold text-slate-400 uppercase">---</p>
+                <p id="conf-type" class="mt-2 text-[9px] font-black text-indigo-300 uppercase tracking-widest">---</p>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+                <button onclick="resetToHome()" class="bg-slate-800 text-slate-400 font-black py-4 rounded-2xl text-[10px] uppercase">ไม่ใช่ฉัน</button>
+                <button onclick="processRegistration()" class="bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-2xl shadow-xl uppercase text-[10px]">ใช่ นี่คือฉัน</button>
+            </div>
+        </div>
+
+        <div id="step-badge" class="hidden space-y-4 step-animate">
+            <div id="digital-badge" class="bg-white rounded-[2.5rem] p-8 text-slate-900 shadow-2xl flex flex-col items-center border-4 border-indigo-600">
+                <div class="w-full flex justify-between items-center mb-6 text-[9px] font-black uppercase">
+                    <div class="bg-indigo-600 text-white px-3 py-1 rounded-lg">RTMS v2.8</div>
+                    <div id="badge-id" class="text-slate-400 font-mono">ID: ----</div>
+                </div>
+                <div id="qr-display" class="qr-container bg-slate-50 p-4 border border-slate-200 mb-4"></div>
+                <div class="text-center space-y-1 mb-4">
+                    <p class="text-[10px] font-black text-emerald-600 uppercase">ยืนยันตัวตนสำเร็จแล้ว</p>
+                    <h3 id="badge-name" class="text-xl font-black leading-tight uppercase">---</h3>
+                    <p id="badge-type" class="text-indigo-600 font-bold text-[10px] uppercase">---</p>
+                    <p id="badge-time" class="text-[9px] font-bold text-slate-400 font-mono mt-1 italic uppercase">--:--:--</p>
+                </div>
+                <div class="w-full bg-slate-50 rounded-2xl p-4 border border-slate-100 text-center">
+                    <p class="text-[9px] font-black text-slate-400 uppercase mb-1 leading-none">สังกัดหน่วย</p>
+                    <p id="badge-unit" class="text-[11px] font-bold text-slate-700 uppercase leading-relaxed tracking-tighter">---</p>
+                </div>
+            </div>
+            <button onclick="downloadBadge()" class="w-full bg-indigo-600 text-white font-black py-4 rounded-2xl shadow-xl uppercase text-[10px]">บันทึกบัตรลงเครื่อง</button>
+            <button onclick="resetToHome()" class="w-full bg-slate-800 text-slate-400 font-black py-4 rounded-2xl uppercase text-[10px] font-bold">เริ่มใหม่ / ปิดหน้าต่าง</button>
+        </div>
+    </div>
+
+    <div id="admin-dashboard" class="hidden w-full max-w-7xl h-full flex flex-col animate-in slide-in-from-right duration-500">
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+            <div>
+                <h1 class="text-2xl font-black uppercase tracking-tighter text-white">Verified <span class="text-indigo-400">Dashboard</span></h1>
+                <p id="admin-status" class="text-[9px] font-bold text-slate-500 uppercase italic">Admin Access Only for Actions</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button onclick="exportCSV()" class="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase shadow-lg">Export CSV</button>
+                <button id="btn-secure-clear" onclick="secureClearData()" class="hidden bg-rose-600 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase shadow-lg">Wipe Data</button>
+                <button id="btn-admin-login" onclick="adminLogin()" class="bg-indigo-600 text-white px-5 py-2.5 rounded-xl text-[10px] font-black uppercase shadow-lg">Admin Login</button>
+                <button onclick="toggleDashboard()" class="bg-slate-800 text-slate-400 px-5 py-2.5 rounded-xl text-[10px] font-black uppercase hover:bg-slate-700">ปิด</button>
+            </div>
+        </header>
+        <div class="glass-card rounded-3xl overflow-hidden flex-1 shadow-2xl">
+            <div class="overflow-x-auto overflow-y-auto max-h-[75vh]">
+                <table class="w-full text-left border-collapse min-w-[1200px]">
+                    <thead class="bg-slate-900/90 sticky top-0 z-20 text-[10px] font-black uppercase text-slate-500 border-b border-white/5">
+                        <tr>
+                            <th class="px-6 py-5">วันเวลาที่ลงทะเบียน</th>
+                            <th class="px-4 py-5">ID</th>
+                            <th class="px-4 py-5">ผลัด</th>
+                            <th class="px-6 py-5">ยศ</th>
+                            <th class="px-6 py-5">ชื่อ</th>
+                            <th class="px-6 py-5">นามสกุล</th>
+                            <th class="px-6 py-5">ประเภท</th>
+                            <th class="px-6 py-5">สังกัดหน่วย/หน่วยงาน</th>
+                        </tr>
+                    </thead>
+                    <tbody id="monitor-list" class="divide-y divide-white/5 text-[11px] font-bold text-slate-200"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyClnFib72Jwn2umtlG0fD4jBaE-aG1ceWk",
+            authDomain: "rtcdb-66284.firebaseapp.com",
+            projectId: "rtcdb-66284",
+            appId: "1:800467259752:web:961e90546df3390e2b06dd"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+        const appId = "military-system-v12";
+
+        let currentPerson = null;
+        let confirmedList = [];
+        let isAdminLoggedIn = false;
+
+        auth.onAuthStateChanged(user => {
+            isAdminLoggedIn = !!user;
+            document.getElementById('btn-secure-clear').classList.toggle('hidden', !user);
+            document.getElementById('btn-admin-login').innerText = user ? "Logout" : "Admin Login";
+        });
+
+        async function adminLogin() {
+            if (isAdminLoggedIn) { auth.signOut(); return; }
+            const e = prompt("Admin Email:"), p = prompt("Password:");
+            if (e && p) auth.signInWithEmailAndPassword(e, p).catch(err => alert("สิทธิ์ไม่ถูกต้อง"));
+        }
+
+        async function searchByPhone() {
+            let phone = document.getElementById('search-phone').value.trim().replace(/-/g, "").replace(/\s/g, "");
+            if (phone.length < 9) return alert("ระบุเบอร์โทรให้ถูกต้อง");
+            const btn = document.getElementById('btn-search'); btn.disabled = true;
+            try {
+                const findInCol = async (path, label) => {
+                    const snap = await db.collection(path).where('phone', '==', phone).limit(1).get();
+                    return snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data(), category: label };
+                };
+                let res = await findInCol(`artifacts/${appId}/public/data/seminar`, 'ผู้เข้าร่วมสัมมนา');
+                if (!res) res = await findInCol(`artifacts/${appId}/public/data/guests`, 'กองอำนวยการ');
+                if (res) {
+                    currentPerson = res;
+                    const rank = (res.rank === 'อื่นๆ') ? (res.rankOther || '') : (res.rank || '');
+                    document.getElementById('conf-name').innerText = `${rank} ${res.firstName} ${res.lastName}`;
+                    document.getElementById('conf-type').innerText = res.category;
+                    // แก้ไข Logic ดึงหน่วยงาน
+                    document.getElementById('conf-unit').innerText = res.unitName || res.unit || '-';
+                    document.getElementById('step-search').classList.add('hidden');
+                    document.getElementById('step-confirm').classList.remove('hidden');
+                } else { alert("ไม่พบข้อมูลเบอร์นี้"); }
+            } catch (err) { alert(err.message); }
+            finally { btn.disabled = false; }
+        }
+
+        async function processRegistration() {
+            if (!currentPerson) return;
+            const now = new Date();
+            const rankStr = (currentPerson.rank === 'อื่นๆ') ? (currentPerson.rankOther || '') : (currentPerson.rank || '');
+            const finalUnit = currentPerson.unitName || currentPerson.unit || '-'; // ดึงหน่วยงานที่ถูกต้อง
+
+            try {
+                await db.collection(`artifacts/${appId}/public/data/self_verified`).add({
+                    id: currentPerson.id,
+                    rank: currentPerson.rank || '',
+                    rankOther: currentPerson.rankOther || '',
+                    firstName: currentPerson.firstName,
+                    lastName: currentPerson.lastName,
+                    unitFinal: finalUnit,
+                    seminarPeriod: currentPerson.seminarPeriod || '-',
+                    category: currentPerson.category,
+                    confirmedAt: now.toLocaleString('th-TH'),
+                    timestamp: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                document.getElementById('badge-id').innerText = `ID: ${currentPerson.id}`;
+                document.getElementById('badge-name').innerText = `${rankStr} ${currentPerson.firstName} ${currentPerson.lastName}`;
+                document.getElementById('badge-type').innerText = currentPerson.category;
+                document.getElementById('badge-unit').innerText = finalUnit;
+                document.getElementById('badge-time').innerText = `ยืนยันเมื่อ: ${now.toLocaleTimeString('th-TH')} (${now.toLocaleDateString('th-TH')})`;
+                document.getElementById('qr-display').innerHTML = '';
+                new QRCode(document.getElementById('qr-display'), { text: currentPerson.id, width: 180, height: 180, colorDark: "#0f172a", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.H });
+                document.getElementById('step-confirm').classList.add('hidden');
+                document.getElementById('step-badge').classList.remove('hidden');
+                loadConfirmedData();
+            } catch (err) { alert(err.message); }
+        }
+
+        async function loadConfirmedData() {
+            const snap = await db.collection(`artifacts/${appId}/public/data/self_verified`).orderBy('timestamp', 'desc').get();
+            confirmedList = snap.docs.map(doc => doc.data());
+            const body = document.getElementById('monitor-list');
+            body.innerHTML = confirmedList.map(i => `
+                <tr class="hover:bg-white/5 transition-colors">
+                    <td class="px-6 py-4 text-slate-400 font-mono text-[10px]">${i.confirmedAt}</td>
+                    <td class="px-4 py-4 text-indigo-400 font-mono">${i.id}</td>
+                    <td class="px-4 py-4 text-white">${i.seminarPeriod || '-'}</td>
+                    <td class="px-6 py-4 text-white">${i.rank === 'อื่นๆ' ? i.rankOther : i.rank}</td>
+                    <td class="px-6 py-4 text-white">${i.firstName}</td>
+                    <td class="px-6 py-4 text-white">${i.lastName}</td>
+                    <td class="px-6 py-4 text-indigo-300 uppercase font-black text-[9px]">${i.category}</td>
+                    <td class="px-6 py-4 text-slate-400 text-[10px] uppercase font-bold italic">${i.unitFinal}</td>
+                </tr>
+            `).join('');
+        }
+
+        function exportCSV() {
+            if (confirmedList.length === 0) return alert("ไม่มีข้อมูล");
+            const data = confirmedList.map(i => ({
+                "วันเวลาที่ลงทะเบียน": i.confirmedAt,
+                "ID": i.id,
+                "ผลัดที่": i.seminarPeriod || "-",
+                "ยศ": i.rank === 'อื่นๆ' ? i.rankOther : i.rank,
+                "ชื่อ": i.firstName,
+                "นามสกุล": i.lastName,
+                "ประเภท": i.category,
+                "หน่วยงาน/สังกัด": i.unitFinal
+            }));
+            const csv = Papa.unparse(data);
+            const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+            link.download = `SelfVerify_Full_Report.csv`; link.click();
+        }
+
+        async function secureClearData() {
+            if (!isAdminLoggedIn) return;
+            if (confirm("ล้างข้อมูลรายงานตัวทั้งหมดหรือไม่? ข้อมูลจะถูกลบถาวร")) {
+                const snap = await db.collection(`artifacts/${appId}/public/data/self_verified`).get();
+                const batch = db.batch();
+                snap.docs.forEach(doc => batch.delete(doc.ref));
+                await batch.commit();
+                loadConfirmedData();
+            }
+        }
+
+        function toggleDashboard() {
+            document.getElementById('registration-ui').classList.toggle('hidden');
+            document.getElementById('admin-dashboard').classList.toggle('hidden');
+            if (!document.getElementById('admin-dashboard').classList.contains('hidden')) loadConfirmedData();
+        }
+
+        function downloadBadge() {
+            html2canvas(document.getElementById('digital-badge'), { scale: 3 }).then(c => {
+                const a = document.createElement('a'); a.download = `Verified_Badge.png`; a.href = c.toDataURL(); a.click();
+            });
+        }
+
+        function resetToHome() {
+            currentPerson = null;
+            document.getElementById('step-confirm').classList.add('hidden');
+            document.getElementById('step-badge').classList.add('hidden');
+            document.getElementById('step-search').classList.remove('hidden');
+            document.getElementById('search-phone').value = '';
+        }
+    </script>
+</body>
+</html>
